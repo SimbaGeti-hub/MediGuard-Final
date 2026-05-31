@@ -1,0 +1,173 @@
+# ============================================================
+# MediGuard AI — .gitignore
+# Place this file at: mediguard_working/.gitignore
+# ============================================================
+
+
+# ============================================================
+# ENVIRONMENT & SECRETS (NEVER commit these)
+# ============================================================
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.staging
+*.env
+
+
+# ============================================================
+# FRONTEND — Next.js
+# ============================================================
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/node_modules/
+
+# Next.js cache & telemetry
+frontend/.next/cache/
+frontend/.swc/
+frontend/.vercel/
+frontend/.netlify/
+
+# TypeScript build artifacts
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+
+
+# ============================================================
+# BACKEND — Python / FastAPI
+# ============================================================
+
+# Byte-compiled / optimized files
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/**/*$py.class
+backend/**/*.pyc
+
+# Virtual environments
+backend/venv/
+backend/.venv/
+backend/env/
+backend/.env/
+backend/ENV/
+
+# Distribution / packaging
+backend/dist/
+backend/build/
+backend/*.egg-info/
+backend/.eggs/
+backend/wheels/
+
+# Pytest
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/coverage.xml
+backend/.tox/
+
+# MyPy / type checkers
+backend/.mypy_cache/
+backend/.dmypy.json
+backend/.pyre/
+
+
+# ============================================================
+# DATABASE & MIGRATIONS
+# ============================================================
+# Never commit local DB files
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+
+# ============================================================
+# LOGS
+# ============================================================
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ============================================================
+# OS FILES
+# ============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encdata
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+
+
+# ============================================================
+# EDITORS & IDEs
+# ============================================================
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# JetBrains (PyCharm, WebStorm, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim / Neovim
+*.swp
+*.swo
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+
+# Emacs
+*~
+\#*\#
+
+
+# ============================================================
+# UPLOADS & USER DATA
+# ============================================================
+uploads/
+media/
+user_uploads/
+
+
+# ============================================================
+# DOCKER (keep Dockerfile, ignore runtime artifacts)
+# ============================================================
+.dockerignore
+docker-compose.override.yml
+
+
+# ============================================================
+# MISC
+# ============================================================
+*.bak
+*.tmp
+*.temp
+*.orig
+*.rej
+.cache/
+.turbo/
