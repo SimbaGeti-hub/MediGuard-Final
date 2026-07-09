@@ -124,7 +124,7 @@ function BreathingExercise() {
         )}
       </div>
 
-      <div style={{ display: 'flex', justify: 'space-around', gap: 12, marginTop: 20, padding: '16px 0 0', borderTop: '1px solid var(--border)', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-around', gap: 12, marginTop: 20, padding: '16px 0 0', borderTop: '1px solid var(--border)', justifyContent: 'center' }}>
         {BREATHING_PHASES.map(p => (
           <div key={p.label} style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: p.color }}>{p.label}</div>
