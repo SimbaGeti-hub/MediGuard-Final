@@ -35,7 +35,7 @@ def get_llm(user_settings: dict):
 
 
 async def safety_classifier_node(state: AgentState) -> dict:
-    """Node 1: Emergency sub-agent — runs before any other processing (MAS pattern)."""
+    """Node 1: Emergency classifier — runs before anything else."""
     user_message = ""
     for msg in reversed(state["messages"]):
         if hasattr(msg, "type") and msg.type == "human":
@@ -79,12 +79,14 @@ async def profile_loader_node(state: AgentState) -> dict:
     current_concern = state.get("current_concern", "")
     memories = []
     if user_id:
-        memories = await get_relevant_memories(user_id=user_id, query=current_concern, max_results=5)
+        memories = await get_relevant_memories(
+            user_id=user_id, query=current_concern, max_results=5
+        )
     return {"long_term_memories": memories}
 
 
 async def agent_reasoner_node(state: AgentState) -> dict:
-    """Node 3: Core ReAct reasoning — LLM decides what tools to call next."""
+    """Node 3: Core ReAct reasoning — now with full Phase 1 integrated context."""
     if state.get("iteration_count", 0) >= state.get("max_iterations", 6):
         return {"should_stop": True, "error_message": "Max iterations reached"}
 
@@ -92,7 +94,17 @@ async def agent_reasoner_node(state: AgentState) -> dict:
         profile=state.get("user_profile", {}),
         memories=state.get("long_term_memories", []),
         settings=state.get("user_settings", {}),
-        tool_toggles={k: v for k, v in state.get("user_settings", {}).items() if k.startswith("tool_")},
+        tool_toggles={
+            k: v for k, v in state.get("user_settings", {}).items()
+            if k.startswith("tool_")
+        },
+        # Phase 1 — full integrated context
+        medications=state.get("medications", []),
+        adherence=state.get("adherence", {}),
+        mood_entries=state.get("mood_entries", []),
+        assessments=state.get("assessments", []),
+        journal_entries=state.get("journal_entries", []),
+        symptom_logs=state.get("symptom_logs", []),
     )
 
     enabled_tools = get_enabled_tools(state.get("user_settings", {}))
@@ -124,7 +136,7 @@ async def agent_reasoner_node(state: AgentState) -> dict:
 
 
 async def tool_executor_node(state: AgentState) -> dict:
-    """Node 4: Execute tool calls — the Act step in ReAct."""
+    """Node 4: Execute tool calls."""
     last_message = state["messages"][-1]
     tool_calls = last_message.tool_calls if hasattr(last_message, "tool_calls") else []
     if not tool_calls:
@@ -143,7 +155,6 @@ async def tool_executor_node(state: AgentState) -> dict:
         tool_args = tool_call["args"]
         tool_call_id = tool_call["id"]
 
-        # Doom-loop detection — same args called 3+ times
         call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
         if new_tools_called.count(call_signature) >= 3:
             tool_messages.append(ToolMessage(
@@ -167,9 +178,8 @@ async def tool_executor_node(state: AgentState) -> dict:
             new_tools_called.append(call_signature)
 
             if updated_react_steps:
-                updated_react_steps[-1]["observation"] = f"Tool '{tool_name}' returned: {result_str[:300]}"
+                updated_react_steps[-1]["observation"] = f"Tool '{tool_name}': {result_str[:300]}"
 
-            # Escalate risk if tool detects emergency
             if isinstance(tool_result, dict) and tool_result.get("urgency", "").upper() == "CRITICAL":
                 state["risk_level"] = "critical"
                 state["emergency_detected"] = True
@@ -189,7 +199,7 @@ async def tool_executor_node(state: AgentState) -> dict:
 
 
 async def hitl_checkpoint_node(state: AgentState) -> dict:
-    """Node 5: Human-in-the-Loop pause point for high-risk situations."""
+    """Node 5: Human-in-the-Loop for high-risk situations."""
     risk = state.get("risk_level", "low")
     emergency = state.get("emergency_detected", False)
 
@@ -198,7 +208,7 @@ async def hitl_checkpoint_node(state: AgentState) -> dict:
 
     if emergency:
         hitl_required = True
-        hitl_reason = "Emergency situation detected. Please review this response before it is sent."
+        hitl_reason = "Emergency situation detected. Please review before sending."
     elif risk == "critical":
         hitl_required = True
         hitl_reason = "Critical risk level detected. Please review before proceeding."

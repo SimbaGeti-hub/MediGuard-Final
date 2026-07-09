@@ -12,6 +12,9 @@ from app.db.sessions import create_session, update_session_title, update_session
 from app.db.messages import save_message, get_session_messages
 from app.db.profiles import get_profile
 from app.db.settings_db import get_user_settings
+from app.db.medications import get_medications, get_adherence_rate
+from app.db.mental_health import get_mood_entries, get_assessments, get_journal_entries
+from app.db.symptoms import get_symptom_logs
 from app.schemas.chat import ChatRequest, HITLApprovalRequest
 from app.config import get_settings
 from langchain_openai import ChatOpenAI
@@ -30,7 +33,6 @@ async def _generate_session_title(session_id: str, first_message: str) -> str:
         fallback = fallback.rsplit(' ', 1)[0]
 
     if not app_settings.OPENAI_API_KEY:
-        logger.warning("[TITLE] No OPENAI_API_KEY — using fallback")
         await update_session_title(session_id, fallback)
         return fallback
 
@@ -49,16 +51,50 @@ async def _generate_session_title(session_id: str, first_message: str) -> str:
         ))])
         generated = response.content.strip().strip('"').strip("'").strip()[:60]
         if generated and len(generated) > 2:
-            logger.info(f"[TITLE] Generated='{generated}'")
             await update_session_title(session_id, generated)
             return generated
-        logger.warning(f"[TITLE] LLM returned empty, using fallback")
     except Exception as e:
         logger.error(f"[TITLE] LLM error: {e}")
 
     await update_session_title(session_id, fallback)
-    logger.info(f"[TITLE] Fallback='{fallback}'")
     return fallback
+
+
+async def _load_user_context(user_id: str) -> dict:
+    """
+    Load ALL user health data in parallel — Phase 1 full integration.
+    Fetches medications, adherence, mood, assessments, journals, and symptoms
+    all at once using asyncio.gather so there is no sequential delay.
+    """
+    results = await asyncio.gather(
+        get_medications(user_id, active_only=True),
+        get_adherence_rate(user_id, days=7),
+        get_mood_entries(user_id, days=30),
+        get_assessments(user_id),
+        get_journal_entries(user_id, limit=5),
+        get_symptom_logs(user_id, days=30),
+        return_exceptions=True,
+    )
+
+    def safe(result, default):
+        return default if isinstance(result, Exception) else (result or default)
+
+    context = {
+        "medications":     safe(results[0], []),
+        "adherence":       safe(results[1], {}),
+        "mood_entries":    safe(results[2], []),
+        "assessments":     safe(results[3], []),
+        "journal_entries": safe(results[4], []),
+        "symptom_logs":    safe(results[5], []),
+    }
+
+    logger.info(
+        f"[CONTEXT] meds={len(context['medications'])} "
+        f"mood={len(context['mood_entries'])} "
+        f"symptoms={len(context['symptom_logs'])} "
+        f"assessments={len(context['assessments'])}"
+    )
+    return context
 
 
 @router.post("/stream")
@@ -73,8 +109,13 @@ async def stream_chat(
     if not valid:
         raise HTTPException(status_code=400, detail=error_msg)
 
-    profile = await get_profile(user_id)
-    user_settings = await get_user_settings(user_id)
+    # Load profile, settings, and all health context in parallel
+    profile, user_settings, health_context = await asyncio.gather(
+        get_profile(user_id),
+        get_user_settings(user_id),
+        _load_user_context(user_id),
+    )
+
     if not user_settings:
         user_settings = {
             "model": "gpt-4o", "personality": "friendly", "temperature": 0.7,
@@ -83,9 +124,7 @@ async def stream_chat(
             "tool_update_health_profile": True,
         }
 
-    # The frontend always sends the active UI language in request.language.
-    # This takes priority over whatever language code is stored in the DB
-    # so the AI always responds in the same language the user currently sees.
+    # Frontend always sends active UI language — override DB value
     if request.language:
         user_settings = {**user_settings, "language": request.language}
 
@@ -94,10 +133,9 @@ async def stream_chat(
         session = await create_session(user_id)
         session_id = session["id"]
 
-    # MUST check BEFORE saving user message
     existing = await get_session_messages(session_id, user_id)
     is_first_message = len(existing) == 0
-    logger.info(f"[CHAT] session={session_id} is_first={is_first_message} existing_count={len(existing)}")
+    logger.info(f"[CHAT] session={session_id} is_first={is_first_message}")
 
     await save_message(session_id=session_id, user_id=user_id, role="user", content=user_message)
 
@@ -112,6 +150,13 @@ async def stream_chat(
             "user_profile": profile,
             "user_settings": user_settings,
             "long_term_memories": [],
+            # Phase 1 — full integrated health context
+            "medications":     health_context["medications"],
+            "adherence":       health_context["adherence"],
+            "mood_entries":    health_context["mood_entries"],
+            "assessments":     health_context["assessments"],
+            "journal_entries": health_context["journal_entries"],
+            "symptom_logs":    health_context["symptom_logs"],
         }
 
         final_response = ""
@@ -132,11 +177,10 @@ async def stream_chat(
                         logger.info(f"[SAFETY] risk={risk} emergency={emergency}")
                         if emergency:
                             yield f"data: {json.dumps({'type': 'emergency', 'risk_level': risk})}\n\n"
-                        elif risk in ("high", "critical"):
-                            yield f"data: {json.dumps({'type': 'thinking', 'message': 'Analyzing your concern...'})}\n\n"
-                            yield f"data: {json.dumps({'type': 'risk_update', 'risk_level': risk})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'thinking', 'message': 'Analyzing your concern...'})}\n\n"
+                        if risk in ("high", "critical"):
+                            yield f"data: {json.dumps({'type': 'risk_update', 'risk_level': risk})}\n\n"
 
                     elif node_name == "agent_reasoner":
                         react_steps = node_output.get("react_steps", [])
@@ -200,7 +244,6 @@ async def stream_chat(
                             await asyncio.sleep(0.02)
                         break
 
-            # Save assistant message
             if final_response:
                 logger.info(f"[CHAT] Saving assistant msg risk={risk} len={len(final_response)}")
                 await save_message(
@@ -211,16 +254,15 @@ async def stream_chat(
                     risk_level=risk, hitl_triggered=hitl_triggered,
                 )
 
-            # Generate and save title
             title = None
             if is_first_message:
-                logger.info(f"[CHAT] First message — generating title")
                 title = await _generate_session_title(session_id, user_message)
 
-            # Update session risk
             await update_session_risk(session_id, risk)
-
-            await log_audit(user_id=user_id, session_id=session_id, action="chat_complete", risk_level=risk)
+            await log_audit(
+                user_id=user_id, session_id=session_id,
+                action="chat_complete", risk_level=risk
+            )
 
             logger.info(f"[CHAT] Done — title='{title}' risk={risk}")
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'title': title, 'risk_level': risk})}\n\n"
@@ -244,7 +286,7 @@ async def stream_chat(
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Access-Control-Allow-Origin": "*"},
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -255,7 +297,10 @@ async def get_messages_route(session_id: str, current_user: dict = Depends(get_c
 
 
 @router.post("/hitl/approve")
-async def approve_hitl(request: HITLApprovalRequest, current_user: dict = Depends(get_current_user)):
+async def approve_hitl(
+    request: HITLApprovalRequest,
+    current_user: dict = Depends(get_current_user)
+):
     graph = get_graph()
     config = {"configurable": {"thread_id": request.session_id}}
     graph.update_state(config, {"hitl_approved": request.approved, "hitl_required": False})

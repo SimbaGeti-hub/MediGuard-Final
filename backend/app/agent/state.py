@@ -4,7 +4,7 @@ from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict):
-    # Core short-term memory — add_messages appends, never replaces
+    # Core conversation memory
     messages: Annotated[list, add_messages]
 
     # User context
@@ -13,6 +13,14 @@ class AgentState(TypedDict):
     user_profile: dict
     user_settings: dict
     long_term_memories: list
+
+    # Phase 1 — Full integrated health context
+    medications: list        # full medication records with dosage/schedule
+    adherence: dict          # 7-day adherence rate and stats
+    mood_entries: list       # recent mood tracking entries
+    assessments: list        # PHQ-9 / GAD-7 results
+    journal_entries: list    # recent journal entries
+    symptom_logs: list       # recent symptom logs with severity/pattern
 
     # Agent working state
     current_concern: str
